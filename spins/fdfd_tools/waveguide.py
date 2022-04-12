@@ -76,7 +76,7 @@ def operator(
 
     # We return the operator as a real operator - For unknown reasons the, even with the
     # bloch vector set to 0, returning a complex operator seems to interfere with the eigen solve
-    return op.astype(float)
+    return np.real(op).astype(float)
 
 
 def normalized_fields(v: np.ndarray,
