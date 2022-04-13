@@ -11,12 +11,12 @@ import spins.gds
 from spins.invdes.problem_graph import creator
 from spins.invdes.problem_graph import optplan
 from spins.invdes.problem_graph import workspace
-
+import numpy as np
 
 def run_plan(plan: optplan.OptimizationPlan,
              project_folder: str,
              save_folder: Optional[str] = None,
-             resume: bool = False) -> None:
+             resume: bool = False, **kwargs) -> None:
     """Executes an optimization plan.
 
     The GDS files referenced from the JSON file should be referenced from
@@ -75,6 +75,12 @@ def run_plan(plan: optplan.OptimizationPlan,
         console_logger.info("Exporting GDS of final design.")
         spins.gds.gen_gds(poly_coords,
                           os.path.join(save_folder, "spins_design.gds"))
+
+    if kwargs.get('save_z'):
+        console_logger.info("Exporting Z-values of final design.")
+        z = parametrization.vec2f@parametrization.vector
+        N = int(np.sqrt(z.shape[0]))
+        np.savetxt(os.path.join(save_folder, "z_values.txt"), z.reshape(N, N, order='F'))
 
     console_logger.info("Spins finished.")
 
