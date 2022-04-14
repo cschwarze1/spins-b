@@ -3,10 +3,16 @@ import scipy as sp
 import scipy.sparse as sparse
 from typing import Tuple
 
-# Define small number to avoid 0 in the denominator.
-EPS = 1e-12
+""" Helper functions for interpolation and enforcing geometric (periodicity/symmetry) constraints. Contents (for quick search access): 
 
+interpolation utilities
+geometry utilities
+periodicity constraint utilities
+symmetry constraint utilities
 
+"""
+
+## interpolation utilities
 def CubicMatrices(x_vector: np.array,
                   y_vector: np.array,
                   xq_vector: np.array,
@@ -75,8 +81,6 @@ def CubicMatrices(x_vector: np.array,
     return (phi2f, phi2fx, phi2fy)
 
 
-# Support functions
-####################
 def floor2vector(arr: np.array,
                  bins: np.array) -> Tuple[np.ndarray, np.ndarray]:
     """Finds the element closest to `bins`.
@@ -758,10 +762,7 @@ def duplicate_boundary_data(shape, axis: int) -> sparse.csc.csc_matrix:
     return per, per_reverse
 
 
-# Geometry matrix functions
-############################
-
-
+## geometry utilities (for defining periodicity and symmetry contraints)
 def make_geometry_matrix_cubic(
         shape,
         reflection_symmetry,
@@ -769,13 +770,13 @@ def make_geometry_matrix_cubic(
         periods,
         full_geometry_matrix: bool = False
 ) -> (sparse.csc.csc_matrix, sparse.csc.csc_matrix):
-    """Make a matrix which expands a parametrizatoin vector according to periodicity and
-    symmetry.
+    """Makes a matrix (and its pseudoinverse) which enforces periodicity
+    and symmetry constraints on a parametrization vector.
 
     Args:
         shape: Shape of the final parametrization.
-        reflection_symmetry: Two element array indicating with or not there is symmetry
-            in the x and y direction.
+        reflection_symmetry: Four element array indicating whether or not there is 
+        horizontal, vertical, primary and/or secondary diagonal reflection symmetry
         periodicity: Two element array indicating whether or not the final parametrization
             is periodic in the x and y direction by adding a duplicate row or column.
         periods: Two element array indicating the amount of periods in the final
@@ -788,14 +789,17 @@ def make_geometry_matrix_cubic(
 
     Return:
         geometry matrix, reverse geometry matrix
+
     """
 
+    # gather periodicity components
     periodicity_unitcell = [
         (p not in [0]) * s for p, s in zip(periods, reflection_symmetry)
     ]
 
     geometry_shape = list(shape)
 
+
     if periodicity[1]:
         add_boundary_y, rev_add_boundary_y = duplicate_boundary_data(
             geometry_shape, 1)
@@ -856,344 +860,23 @@ def make_geometry_matrix_cubic(
         add_unitcellboundary_x = sparse.eye(add_unitcellboundary_y.shape[0])
     geometry_shape = [int(sh) for sh in geometry_shape]
 
-    if reflection_symmetry[1]:
-        symmetry_y, rev_symmetry_y = symmetry_matrix(geometry_shape, axis=0)
-        geometry_shape[1] = np.ceil(geometry_shape[1] / 2)
-    else:
-        symmetry_y = sparse.eye(rev_add_unitcellboundary_x.shape[1])
-        rev_symmetry_y = sparse.eye(add_unitcellboundary_x.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    if reflection_symmetry[0]:
-        symmetry_x, rev_symmetry_x = symmetry_matrix(geometry_shape, axis=1)
-        geometry_shape[0] = np.ceil(geometry_shape[0] / 2)
-    else:
-        symmetry_x = sparse.eye(symmetry_y.shape[1])
-        rev_symmetry_x = sparse.eye(rev_symmetry_y.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
+    # gather symmetry components
+    symmetry_compression, symmetry_decompression = generate_symmetry_matrix(geometry_shape, axes=reflection_symmetry)
 
-    # add_boundary_y@add_boundary_x
+    # combine periodicity and symmetry parts into one geometry_matrix
+    geometry_matrix = periodic_y@periodic_x@rev_add_unitcellboundary_y@rev_add_unitcellboundary_x@symmetry_decompression
+
     if full_geometry_matrix:
-        geometry_matrix = add_boundary_y@add_boundary_x@periodic_y@periodic_x@ \
-            rev_add_unitcellboundary_y@rev_add_unitcellboundary_x@symmetry_y@symmetry_x
-    else:
-        geometry_matrix = periodic_y@periodic_x@ \
-            rev_add_unitcellboundary_y@rev_add_unitcellboundary_x@symmetry_y@symmetry_x
-    rev_geometry_matrix = rev_symmetry_x@rev_symmetry_y@add_unitcellboundary_x@ \
+        geometry_matrix = add_boundary_y@add_boundary_x@geometry_matrix
+
+    rev_geometry_matrix = symmetry_compression@add_unitcellboundary_x@ \
         add_unitcellboundary_y@rev_periodic_x@rev_periodic_y@rev_add_boundary_x@ \
             rev_add_boundary_y
 
     return geometry_matrix, rev_geometry_matrix
 
 
-def make_geometry_matrix_hermite(shape, reflection_symmetry, periodicity,
-                                 periods):
-    """Make a matrix which expands a parametrization vector of the form [f, fx, fy, fxy]
-    according to periodicity and symmetry.
-
-    Args:
-        shape: Shape of the final parametrization.
-        reflection_symmetry: Two element array indicating with or not there is symmetry
-            in the x and y direction.
-        periodicity: Two element array indicating whether or not the final parametrization
-            is periodic in the x and y direction by adding a duplicate row or column.
-        periods: Two element array indicating the amount of periods in the final
-            parametrization in the x and y direction.
-        full_geometry_matrix: Boolean indicating whether of not the periodicity is applied
-            to the geometry matrix. (in parametrization this is taken into account
-            in the cubic interpolation matrix and should not be part of the geometry
-            matrix.) This does not effect the reverse geometry matrix. There the periodicity
-            is always taken into account.
-
-    Return:
-        geometry matrix, reverse geometry matrix
-    """
-
-    periodicity_unitcell = [
-        (p not in [0, 1]) * s for p, s in zip(periods, reflection_symmetry)
-    ]
-
-    geometry_shape = list(shape)
-
-    if periodicity[1]:
-        add_boundary_y, rev_add_boundary_y = duplicate_boundary_data(
-            geometry_shape, 1)
-        geometry_shape[1] -= 1
-    else:
-        add_boundary_y = sparse.eye(geometry_shape[0] * geometry_shape[1])
-        rev_add_boundary_y = sparse.eye(geometry_shape[0] * geometry_shape[1])
-    rev_add_boundary_y_derivatives = sparse.block_diag(
-        4 * (rev_add_boundary_y,))
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    if periodicity[0]:
-        add_boundary_x, rev_add_boundary_x = duplicate_boundary_data(
-            geometry_shape, 0)
-        geometry_shape[0] -= 1
-    else:
-        add_boundary_x = sparse.eye(add_boundary_y.shape[1])
-        rev_add_boundary_x = sparse.eye(rev_add_boundary_y.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    rev_add_boundary_x_derivatives = sparse.block_diag(
-        4 * (rev_add_boundary_x,))
-
-    if periods[1] == 0:
-        periodic_y = sparse.eye(add_boundary_x.shape[1])
-        rev_periodic_y = sparse.eye(rev_add_boundary_x.shape[0])
-    elif geometry_shape[1] % periods[1] == 0:
-        periodic_y, rev_periodic_y = periodic_matrix(
-            geometry_shape, axis=1, periods=periods[1])
-        geometry_shape[1] /= periods[1]
-    else:
-        raise ValueError(
-            "The parametrization shape does not match the periodicity " +
-            "in the y direction.")
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    periodic_y_derivatives = sparse.block_diag(4 * (periodic_y,))
-    rev_periodic_y_derivatives = sparse.block_diag(4 * (rev_periodic_y,))
-    if periods[0] == 0:
-        periodic_x = sparse.eye(periodic_y.shape[1])
-        rev_periodic_x = sparse.eye(rev_periodic_y.shape[0])
-    elif geometry_shape[0] % periods[0] == 0:
-        periodic_x, rev_periodic_x = periodic_matrix(
-            geometry_shape, axis=0, periods=periods[0])
-        geometry_shape[0] /= periods[0]
-    else:
-        raise ValueError(
-            "The parametrization shape does not match the periodicity " +
-            "in the x direction.")
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    periodic_x_derivatives = sparse.block_diag(4 * (periodic_x,))
-    rev_periodic_x_derivatives = sparse.block_diag(4 * (rev_periodic_x,))
-
-    if periodicity_unitcell[1]:
-        geometry_shape[1] += 1
-        add_unitcellboundary_y, rev_add_unitcellboundary_y = duplicate_boundary_data(
-            geometry_shape, 1)
-    else:
-        add_unitcellboundary_y = sparse.eye(periodic_x.shape[1])
-        rev_add_unitcellboundary_y = sparse.eye(rev_periodic_x.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    add_unitcellboundary_y_derivatives = sparse.block_diag(
-        4 * (add_unitcellboundary_y,))
-    rev_add_unitcellboundary_y_derivatives = sparse.block_diag(
-        4 * (rev_add_unitcellboundary_y,))
-    if periodicity_unitcell[0]:
-        geometry_shape[0] += 1
-        add_unitcellboundary_x, rev_add_unitcellboundary_x = duplicate_boundary_data(
-            geometry_shape, 0)
-    else:
-        rev_add_unitcellboundary_x = sparse.eye(
-            rev_add_unitcellboundary_y.shape[1])
-        add_unitcellboundary_x = sparse.eye(add_unitcellboundary_y.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    add_unitcellboundary_x_derivatives = sparse.block_diag(
-        4 * (add_unitcellboundary_x,))
-    rev_add_unitcellboundary_x_derivatives = sparse.block_diag(
-        4 * (rev_add_unitcellboundary_x,))
-
-    #Correct the sign of the derivatives based on symmetry.
-    sign_matrix_list = [sparse.eye(rev_add_unitcellboundary_x.shape[1])]
-    if reflection_symmetry[0]:
-        sign_matrix_x = symmetry_matrix_sign_correction(geometry_shape, 0, -1,
-                                                        bool(periodicity[0]))
-    else:
-        sign_matrix_x = sparse.eye(rev_add_unitcellboundary_x.shape[1])
-    sign_matrix_list.append(sign_matrix_x)
-    if reflection_symmetry[1]:
-        sign_matrix_y = symmetry_matrix_sign_correction(geometry_shape, 1, -1,
-                                                        bool(periodicity[1]))
-    else:
-        sign_matrix_y = sparse.eye(rev_add_unitcellboundary_x.shape[1])
-    sign_matrix_list.append(sign_matrix_y)
-    sign_matrix_list.append(sign_matrix_x @ sign_matrix_y)
-    symmetry_sign = sparse.block_diag(tuple(sign_matrix_list))
-
-    #Make symmetry matrices.
-    if reflection_symmetry[1]:
-        symmetry_y, rev_symmetry_y = symmetry_matrix(geometry_shape, axis=0)
-        geometry_shape[1] = np.ceil(geometry_shape[1] / 2)
-    else:
-        symmetry_y = sparse.eye(rev_add_unitcellboundary_x.shape[1])
-        rev_symmetry_y = sparse.eye(add_unitcellboundary_x.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    symmetry_y_derivatives = sparse.block_diag(4 * (symmetry_y,))
-    rev_symmetry_y_derivatives = sparse.block_diag(4 * (rev_symmetry_y,))
-    if reflection_symmetry[0]:
-        symmetry_x, rev_symmetry_x = symmetry_matrix(geometry_shape, axis=1)
-        geometry_shape[0] = np.ceil(geometry_shape[0] / 2)
-    else:
-        symmetry_x = sparse.eye(symmetry_y.shape[1])
-        rev_symmetry_x = sparse.eye(rev_symmetry_y.shape[0])
-    geometry_shape = [int(sh) for sh in geometry_shape]
-    symmetry_x_derivatives = sparse.block_diag(4 * (symmetry_x,))
-    rev_symmetry_x_derivatives = sparse.block_diag(4 * (rev_symmetry_x,))
-
-    geometry_matrix = periodic_y_derivatives@periodic_x_derivatives \
-        @rev_add_unitcellboundary_y_derivatives@rev_add_unitcellboundary_x_derivatives\
-        @symmetry_sign \
-        @symmetry_y_derivatives@symmetry_x_derivatives
-    rev_geometry_matrix = rev_symmetry_x_derivatives@rev_symmetry_y_derivatives \
-        @symmetry_sign \
-        @add_unitcellboundary_x_derivatives@add_unitcellboundary_y_derivatives \
-        @rev_periodic_x_derivatives@rev_periodic_y_derivatives \
-        @rev_add_boundary_x_derivatives@rev_add_boundary_y_derivatives
-
-    return geometry_matrix, rev_geometry_matrix
-
-
-def symmetry_matrix(shape: tuple, axis: int) -> sparse.coo.coo_matrix:
-    '''
-    SymmetryMatrix generated a symmetry matrix.
-        For example, given a parametrization defined by an xy-grid that
-        is symmetric in the x axis, this function will return a matrix that
-        turn a parametrization that describes the right side of the grid in a
-        parametrization over the entire grid. The matrix size will thus be
-        (shape[0]*shape[1])x(shape[0]/2*shape[1]).
-        Note: you give the symmetry axis if axis is 0 the second coordinate is
-            symmetric. If the axis is 1 the first coordinate is symmetric
-
-    Args:
-        shape: Shape of the parametrization.
-        axis: Symmetry axis.
-    '''
-    n_x = shape[0]
-    n_y = shape[1]
-
-    if axis == 0:
-        block_1 = sparse.eye(int(n_x * np.ceil(n_y / 2)))
-        block_b = sparse.eye(n_x).tocsr()
-        block_b.indices = -1 * block_b.indices + block_b.shape[1] - 1
-        block_2 = sparse.block_diag(tuple(int(n_y / 2) * [block_b])).tocsr()
-        block_2.indices = -1 * block_2.indices + block_2.shape[1] - 1
-        if bool(n_y % 2):
-            block_2 = sparse.hstack(
-                [block_2, sparse.csr_matrix((n_x * int(n_y / 2), n_x))])
-        sym = sparse.vstack([block_1, block_2])
-        sym_reverse = sparse.hstack(
-            [block_1, sparse.csr_matrix(block_2.shape).T])
-    elif axis == 1:
-        block_a = sparse.eye(int(np.ceil(n_x / 2))).tocsr()
-        block_b = sparse.eye(int(n_x / 2)).tocsr()
-        block_b.indices = -1 * block_b.indices + block_b.shape[1] - 1
-        if n_x % 2 == 1:
-            block_b = sparse.hstack([block_b, sparse.csr_matrix((n_x // 2, 1))])
-        block_matrix = sparse.vstack([block_a, block_b])
-        sym = sparse.block_diag(tuple(n_y * [block_matrix]))
-        block_matrix_reverse = sparse.vstack(
-            [block_a, sparse.csr_matrix(block_b.shape)])
-        sym_reverse = sparse.block_diag(tuple(
-            n_y * [block_matrix_reverse])).transpose()
-
-    return sym, sym_reverse
-
-
-#deprecated function: use symmetry_matrix
-def symmetry_matrix2D(x: np.array, y: np.array,
-                      axis: int) -> sparse.coo.coo_matrix:
-    '''
-    SymmetryMatrix2D generated a symmetry matrix.
-        For example, given a parametrization defined by an xy-grid that
-        is symmetric in the x axis, this function will return a matrix that
-        turn a parametrization that describes the right side of the grid in a
-        parametrization over the entire grid. The matrix size will thus be
-        (len(x)*len(y))x(len(x)/2*len(y)).
-        Note: you give the symmetry axis if axis is 0 the second coordinate is
-            symmetric. If the axis is 1 the first coordinate is symmetric
-
-    Args:
-        shape: Shape of the parametrization.
-        axis: Symmetry axis.
-    '''
-    n_x = len(x)
-    n_y = len(y)
-
-    sym, sym_reverse = symmetry_matrix((n_x, n_y), axis)
-
-    return sym, sym_reverse
-
-
-def symmetry_matrix_sign_correction(shape: tuple,
-                                    axis: int,
-                                    sign: int = 1,
-                                    periodicity: bool = False):
-    '''
-    SymmetryMatrix2D_sign_correction generates a matrix that corrects the sign of every
-        parameter component (f, fx, fy, fxy) according to the parametrization being symmetric
-        or anti-symmetric.
-
-        The correct symmetry_matrix for [f, fx, fy, fxy] will be of the form:
-            sign_matrix@block_diag(4*symmetry matrix)
-
-    Args:
-        shape: Shape of the parametrization.
-        axis: Symmetry axis.
-        sign: 1 or -1 depanding whether or not you have symmetry or anti-symmetry.
-        periodicity: Indicating whether or not there is periodicity.
-
-    Returns:
-        periodicity matrix
-    '''
-    n_x = shape[0]
-    n_y = shape[1]
-    periodic = int(not periodicity)
-
-    if axis == 1:
-        periodic = int(not periodicity)
-        block_1 = sparse.eye(int(n_x * (n_y // 2)))
-        block_c = sign * (sign > 0) * sparse.eye(n_x, n_x)
-        block_2 = sign * sparse.eye(int(n_x * (n_y // 2)))
-        zero_0 = sparse.diags([periodic] * n_x + [1] * n_x * (n_y - 2) +
-                              [periodic] * n_x)
-        if bool(n_y % 2):
-            sym_corr = sparse.block_diag((block_1, block_c, block_2)) @ zero_0
-        else:
-            sym_corr = sparse.block_diag((block_1, block_2)) @ zero_0
-    elif axis == 0:
-        block_1 = sparse.eye(n_x // 2)
-        block_c = sign * (sign > 0) * sparse.eye(1, 1)
-        block_2 = sign * sparse.eye(n_x // 2)
-        zero_0 = sparse.diags([periodic] + [1] * (n_x - 2) + [periodic])
-        if bool(n_x % 2):
-            sym_corr_row = sparse.block_diag(
-                (block_1, block_c, block_2)) @ zero_0
-        else:
-            sym_corr_row = sparse.block_diag((block_1, block_2)) @ zero_0
-        sym_corr = sparse.block_diag(tuple(n_y * [sym_corr_row]))
-
-    return sym_corr
-
-
-#deprecated function: use symmetry_matrix_sign_correction
-def symmetry_matrix2D_sign_correction(x_vector: np.array,
-                                      y_vector: np.array,
-                                      axis: int,
-                                      sign: int = 1,
-                                      periodicity: bool = False):
-    '''
-    SymmetryMatrix2D_sign_correction generates a matrixon3 that corrects the sign of every
-        parameter component (f, fx, fy, fxy) according to the parametrization being symmetric
-        or anti-symmetric.
-
-        The correct symmetry_matrix for [f, fx, fy, fxy] will be of the form:
-            sign_matrix@block_diag(4*symmetry matrix)
-
-    Args:
-     x_vector: x vector of the fine grid
-     y_vector: y vector of the fine grid
-     axis: Symmetry axis.
-     sign: 1 or -1 depanding whether or not you have symmetry or anti-symmetry.
-     periodicity: Indicating whether or not there is periodicity.
-
-    Return:
-     sign_correction matrix
-
-
-    '''
-    n_x = len(x_vector)
-    n_y = len(y_vector)
-    shape = (n_x, n_y)
-    return symmetry_matrix_sign_correction(shape, axis, sign, periodicity)
-
-
+## periodicity constraint utilities
 def make_periodicity_matrix(shape, periodicity):
     '''
     Make_periodicity matrix makes a sparse matrix that will duplicate the first
@@ -1227,7 +910,7 @@ def make_periodicity_matrix(shape, periodicity):
 def periodic_matrix(shape: list, axis: int,
                     periods=int) -> sparse.coo.coo_matrix:
     '''
-    periodic_matrix generated a sparse matrix that duplicates a
+    periodic_matrix generates a sparse matrix that duplicates a
     parametrization vector according to a give periodicity
 
     If the periods is 0, it will only duplicate the outer parametrization in
@@ -1273,17 +956,229 @@ def periodic_matrix(shape: list, axis: int,
     return geometry_matrix, geometry_matrix_reverse
 
 
-#deprecated function: use periodic_matrix
-def periodic_matrix2D(x: np.array, y: np.array, axis: int,
-                      periods=int) -> sparse.coo.coo_matrix:
-    '''
-    periodic_matrix2D generated a sparse matrix that duplicates a
-    parametrization vector according to a give periodicity
+## symmetry constraint utilities
+def generate_symmetry_matrix(shape: tuple, axes: tuple) -> sparse.coo.coo_matrix:
+    '''symmetry_matrix generates matrices that map the space of a
+    parametrization vector into a space of smaller dimension and vice
+    versa. Hence these matrices are not square from that alone one can
+    see they are NOT elements of a point group.
 
-    If the periods is 0, it will only duplicate the outer parametrization in
-    the axis direction, rather then duplicating the parametrization. (this
-    is usefull to describe a structure with periodic boundary conditions)
+    A better term for these are "compression" and "decompression"
+    matrices; that is exactly what reverse_geometry_matrix and
+    geometry_matrix respectively are.
+
+    The compression is lossless because the constraint corresponding
+    to some kind of reflection symmetry is used to restore all points
+    thrown away during the compression.
+    
+    The parametrization vector begins as a flattened (in column-major
+    order) version of the 2D image of Z-values. Thus these matrices
+    act on column vectors either produced from this flattening map or
+    produced by another symmetry (or periodicity) matrix.
+    
+    Example:
+    For symmetry about the main diagonal (note this
+    requires a square grid) the constraint is A_ij = A_ji. Let (D) C be
+    the (de)compression matrix produced by this subroutine. Then put
+    v = A.flatten(order='F')
+    v_compressed = C@v
+    v_restored = D@v_compressed
+    A will exactly equal v_restored.reshape(A.shape, order='F').
+
+    Caveats:
+    Our convention for axis, which was chosen somewhat arbitrarily is as follows.
+    axes[0] == 1 <--> symmetry about y (vertical)
+    axes[1] == 1 <--> symmetry about x (horizontal)
+    axes[2] == 1 <--> primary diagonal symmetry
+    axes[3] == 1 <--> secondary diagonal symmetry
+    
+    Having both axis 2 and 3 together is not supported. It's possible,
+    but would require a standalone parametrization for the compression
+    and decompression matrices. It's also unlikely to be required in
+    practice: if you only have reflection symmetries about two
+    orthogonal axes, you should parametrize your background/design
+    region so that these are the vertical and horizontal axes.
+
+    For D4 symmetry use axes = [1, 1, 1, 0]. This is because the
+    compression matrices for the 0 and 1 axis keep the upper-left
+    block of the original matrix.
+
+    Arguments: 
+    shape: dimensions of the coarse grid
+   
+    axes: the axes which manifest design-region reflection
+    symmetry.
+
+    Returns:
+    C: compression matrix
+    D: decompression matrix
+
+    The dimensions of these matrices vary according to the chosen
+    symmetry axes.
+
     '''
-    n_x = len(x)
-    n_y = len(y)
-    periodic_matrix((n_x, n_y), axis, periods)
+    n_x = shape[0]
+    n_y = shape[1]
+
+    # vertical symmetry; compress to left half only
+    if axes[0]:
+        block_1 = sparse.eye(int(n_x * np.ceil(n_y / 2)))
+        block_b = sparse.eye(n_x).tocsr()
+        block_b.indices = -1 * block_b.indices + block_b.shape[1] - 1
+        block_2 = sparse.block_diag(tuple(int(n_y / 2) * [block_b])).tocsr()
+        block_2.indices = -1 * block_2.indices + block_2.shape[1] - 1
+        if bool(n_y % 2):
+            block_2 = sparse.hstack([block_2, sparse.csr_matrix((n_x * int(n_y / 2), n_x))])
+
+        D0 = sparse.vstack([block_1, block_2])
+        C0 = sparse.hstack(
+            [block_1, sparse.csr_matrix(block_2.shape).T])
+
+        n_y = int(round((n_y/2)))
+
+    else:
+        D0 = sparse.eye(n_x*ny)
+        C0 = sparse.eye(n_x*ny)
+
+    # horizontal symmetry: compress to upper half only
+    if axes[1]:
+        block_a = sparse.eye(int(np.ceil(n_x / 2))).tocsr()
+        block_b = sparse.eye(int(n_x / 2)).tocsr()
+        block_b.indices = -1 * block_b.indices + block_b.shape[1] - 1
+        if n_x % 2 == 1:
+            block_b = sparse.hstack([block_b, sparse.csr_matrix((n_x // 2, 1))])
+        block_matrix = sparse.vstack([block_a, block_b])
+        D1 = sparse.block_diag(tuple(n_y * [block_matrix]))
+        block_matrix_reverse = sparse.vstack(
+            [block_a, sparse.csr_matrix(block_b.shape)])
+        C1 = sparse.block_diag(tuple(
+            n_y * [block_matrix_reverse])).transpose()
+
+        n_x = int(round(n_x/2))
+        
+    else:
+        D1 = sparse.eye(D0.shape[1])
+        C1 = sparse.eye(C0.shape[0])
+
+    # main diagonal symmetry: compress to lower-left triangle and main diagonal
+    if axes[2] and not axes[3]: 
+        assert n_x == n_y
+        C2, D2 = primary_diagonal_symmetry(n_x)
+        C2 = sparse.csr_matrix(C2)
+        D2 = sparse.csr_matrix(D2)
+        
+    else:
+        D2 = sparse.eye(D1.shape[1])
+        C2 = sparse.eye(C1.shape[0])
+
+    # secondary diagonal symmetry: compress to upper-left triangle and secondary diagonal
+    if axes[3] and not axes[2]:
+        assert n_x == n_y
+        C3, D3 = secondary_diagonal_symmetry(n_x)
+        C3 = sparse.csr_matrix(C3)
+        D3 = sparse.csr_matrix(D3)
+
+    else:
+        D3 = sparse.eye(D2.shape[1])
+        C3 = sparse.eye(C2.shape[0])
+
+    C = C3@C2@C1@C0
+    D = D0@D1@D2@D3
+        
+    return C, D
+
+def flatten(n, tup):
+    # Fortran-style flatten acting on indices of an (m, n) matrix
+    i = tup[0]
+    j = tup[1]
+    k = n*(i-1) + j
+    return k
+
+def unflatten(n, k):
+    # Fortran-style unflatten map that acts on indices of an (m, n) matrix
+    # j = k % n
+    j = ((k-1) % n)+1 # o.w. k == N^2 breaks
+    
+    i = (k - j)/n + 1
+    return (i, j)
+    
+def primary_diagonal_symmetry(n):
+    """Generate compression and decompression symmetry matrices for
+    reflection symmetry over the main diagonal of an n x n image.
+    """
+
+    # this helper function is not really needed but illustrates the general process well
+    def gamma(tup):
+        """Symmetry map with respect to the indices. For diagonal symmetry it
+        is simply an index swap.
+        """
+        return (tup[1], tup[0])
+
+    # first generate the compression matrix, C; there are an infinite
+    # number of ways to do this but each way has a unique D
+    if not type(n) == int:
+        raise TypeError
+
+    C_dims = (int((n**2 + n)/2), n**2)
+    C = np.zeros(C_dims)
+    i = 0
+    j = 0
+    for block_ix in range(n):
+        block = np.zeros((n-block_ix, n))
+        block[:, block_ix:] = np.eye(n-block_ix)
+        C[i:i+(n-block_ix), j:j+n] = block
+        i+=(n-block_ix)
+        j+=n
+
+    # Next we generate the decompression matrix D. It is quickest to
+    # do this by beginning with the transpose of C and correcting the
+    # null rows in D using the symmetry transformation
+    D = np.transpose(C).copy() # w/o copy we'd be modifying C as well!
+
+    # iterate through skip locations (compression points)
+    for m in range(1, n):
+        for k in range(m*n, m*n+m):
+            k_prime = int(flatten(n, gamma(unflatten(n, k+1)))-1) # -1 to correct for 0-based indexing
+            D[k, :] = D[k_prime, :]
+
+    return C, D
+
+def secondary_diagonal_symmetry(n):
+    """Generate compression and decompression symmetry matrices for
+    reflection symmetry over the secondary diagonal of an n x n
+    image. The phrase secondary diagonal refers to the diagonal which
+    starts at index (n, 1) and traverses "northeast" to (1, n). In
+    zero-index systems that's (n-1, 0) to (0, n-1).
+    """
+    def gamma(tup):
+        """Symmetry map with respect to the indices. For diagonal symmetry it
+        is simply an index swap. Map is for 1-based indexing.
+        """
+        return (n - tup[1] + 1, n - tup[0] + 1)
+
+    if not type(n) == int:
+        raise TypeError
+
+    C_dims = (int((n**2 + n)/2), n**2)
+    C = np.zeros(C_dims)
+    i = 0
+    j = 0
+    
+    for block_ix in range(n):
+        block = np.zeros((n-block_ix, n))
+        block[:, :(n-block_ix)] = np.eye(n-block_ix)
+        C[i:i+(n-block_ix), j:j+n] = block
+        i+=(n-block_ix)
+        j+=n
+
+    D = np.transpose(C).copy()
+
+    # 2n, (3n-1, 3n), ..., (Mn - M + 2, ..., Mn)
+    # 2 <= M <= n
+    # iterate through these skip locations (compression points)
+    for m in range(2, n+1):
+        for k in range(m*n-m+2, m*n+1):
+            k_prime = int(flatten(n, gamma(unflatten(n, k)))-1)
+            D[k-1, :] = D[k_prime, :]
+
+    return C, D
