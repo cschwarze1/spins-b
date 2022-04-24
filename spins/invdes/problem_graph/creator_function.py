@@ -53,3 +53,9 @@ def create_product(params: optplan.Product,
 def create_constant(params: optplan.Constant,
                     work: workspace.Workspace) -> problem.Constant:
     return problem.Constant(value=params.value.real + 1j * params.value.imag)
+
+
+@optplan.register_node(optplan.Minimax)
+def create_minimax(params: optplan.Minimax, work: workspace.Workspace) -> problem.Minimax:
+    fun_list = [work.get_object(fun) for fun in params.functions]
+    return problem.Minimax(objectives=fun_list)

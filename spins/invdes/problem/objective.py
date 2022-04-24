@@ -889,3 +889,34 @@ class RealPart(OptimizationFunction):
 
     def grad(self, input_vals: List[np.ndarray], grad_val: np.ndarray) -> List[np.ndarray]:
         return [grad_val]
+
+
+class Minimax(OptimizationFunction):
+    """Minimize the maximum across a list of scalar-valued
+    OptimizationFunction objectives."""
+
+    def __init__(self, objectives: List[OptimizationFunction]) -> None:
+
+        self.objectives = objectives
+        self.cache = [None for obj in objectives]
+        self.argmax = None
+        super().__init__(self.objectives)
+
+    def eval(self, input_vals: List[np.ndarray]) -> np.ndarray:
+
+        for ix, obj in enumerate(self.objectives):
+            self.cache[ix] = obj.eval([input_vals[ix]]) 
+
+        m = max(self.cache)
+        self.argmax = 0
+        while self.cache[self.argmax] != m:
+            self.argmax += 1
+            
+        return m
+    
+    def grad(self, input_vals: List[np.ndarray], grad_val: np.ndarray) -> List[np.ndarray]:
+        return self.objectives[self.argmax].grad(input_vals, grad_val)
+
+    def __str__(self):
+        string = "(" + " + ".join(str(obj) for obj in self.objectives) + ")"
+        return string

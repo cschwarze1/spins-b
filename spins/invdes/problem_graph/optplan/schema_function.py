@@ -151,3 +151,11 @@ class Parameter(optplan.Function):
     """
     type = schema_utils.polymorphic_model_type("function.parameter")
     initial_value = types.FloatType()
+
+@optplan.register_node_type()
+class Minimax(optplan.Function):
+    type = schema_utils.polymorphic_model_type("function.minimax")
+    functions = types.ListType(optplan.ReferenceType(optplan.Function))
+
+def max(functions):
+    return Minimax(functions=functions)
