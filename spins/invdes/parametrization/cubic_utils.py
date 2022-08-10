@@ -1034,11 +1034,11 @@ def generate_symmetry_matrix(shape: tuple, axes: tuple) -> sparse.coo.coo_matrix
         C0 = sparse.hstack(
             [block_1, sparse.csr_matrix(block_2.shape).T])
 
-        n_y = int(round((n_y/2)))
+        n_y = int(np.ceil(n_y/2))
 
     else:
-        D0 = sparse.eye(n_x*ny)
-        C0 = sparse.eye(n_x*ny)
+        D0 = sparse.eye(n_x*n_y)
+        C0 = sparse.eye(n_x*n_y)
 
     # horizontal symmetry: compress to upper half only
     if axes[1]:
@@ -1054,7 +1054,7 @@ def generate_symmetry_matrix(shape: tuple, axes: tuple) -> sparse.coo.coo_matrix
         C1 = sparse.block_diag(tuple(
             n_y * [block_matrix_reverse])).transpose()
 
-        n_x = int(round(n_x/2))
+        n_x = int(np.ceil(n_x/2))
         
     else:
         D1 = sparse.eye(D0.shape[1])
