@@ -63,9 +63,17 @@ def run_plan(plan: optplan.OptimizationPlan,
         work.logger.write_checkpoint(transformation_param.name)
         event_data = None
 
-    # Make a GDS if needed.
+    # export outputs
     final_parametrization = plan.transformations[-1].parametrization
     parametrization = work.get_object(final_parametrization)
+
+    if kwargs.get('save_z'):
+        console_logger.info("Exporting Z-values of final design.")
+        z = parametrization.vec2f@parametrization.vector
+        N = int(np.sqrt(z.shape[0]))
+        np.savetxt(os.path.join(save_folder, "z_values.txt"), z.reshape(N, N, order='F'))
+
+    
     # TODO(logansu): Have a better way of generating GDS than this.
     if hasattr(parametrization, "generate_polygons"):
         simspace_name = final_parametrization.simulation_space
@@ -76,11 +84,6 @@ def run_plan(plan: optplan.OptimizationPlan,
         spins.gds.gen_gds(poly_coords,
                           os.path.join(save_folder, "spins_design.gds"))
 
-    if kwargs.get('save_z'):
-        console_logger.info("Exporting Z-values of final design.")
-        z = parametrization.vec2f@parametrization.vector
-        N = int(np.sqrt(z.shape[0]))
-        np.savetxt(os.path.join(save_folder, "z_values.txt"), z.reshape(N, N, order='F'))
 
     console_logger.info("Spins finished.")
 

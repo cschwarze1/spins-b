@@ -85,12 +85,13 @@ def create_cubic_or_hermite_levelset(
     # Calculate reflection symmetry.
     reflection_symmetry = params.reflection_symmetry
     if reflection_symmetry is None:
-        reflection_symmetry = np.array([0, 0])
+        reflection_symmetry = np.array([0, 0, 0, 0])
 
     # Make fine grid.
     undersample = params.undersample
     fine_x = np.arange(-design_dims[0] / 2, design_dims[0] / 2)
     fine_y = np.arange(-design_dims[1] / 2, design_dims[1] / 2)
+
     # Center the grid.
     fine_x -= (fine_x[-1] + fine_x[0]) / 2
     fine_y -= (fine_y[-1] + fine_y[0]) / 2
@@ -102,8 +103,8 @@ def create_cubic_or_hermite_levelset(
     else:
         coarse_x = np.arange(-design_dims[0] / 2 - undersample,
                              design_dims[0] / 2 + undersample, undersample)
-    coarse_x -= (coarse_x[-1] +
-                 coarse_x[0]) / 2  # this is necessary to have correct symmetry
+
+    coarse_x -= (coarse_x[-1] + coarse_x[0]) / 2  # this is necessary to have correct symmetry
 
     if periodicity[1]:
         n_y = int(np.round((fine_y[-1] - fine_y[0]) / undersample) + 1)
