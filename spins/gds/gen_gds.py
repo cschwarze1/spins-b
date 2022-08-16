@@ -99,8 +99,13 @@ def gen_gds(poly_coords: List[np.ndarray],
                 containment_mx = np.array(containment_mx) - np.eye(
                     len(gds_polygons))
                 overlap_list = np.sum(containment_mx, axis=1)
+
+                if sum(overlap_list) == 0:
+                    break
+
                 target_polys = np.where(overlap_list == overlap_num)[0]
                 overlap_num = 0
+
                 
     for polygon in gds_polygons:
         poly_cell.add(polygon)
