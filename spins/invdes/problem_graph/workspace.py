@@ -5,6 +5,7 @@ The workspace has the following responsibilities:
     2) Handling execution of transformations.
 """
 import collections
+collections.Iterable = collections.abc.Iterable
 from datetime import datetime
 import glob
 import logging

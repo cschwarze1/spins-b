@@ -17,8 +17,7 @@ source ./spins-env/bin/activate
 
 6. Install spins-b dependencies in the venv
 (spins-env) $ pip3 install ./spins-b
-(spins-env) $ pip3 install seaborn
-(spins-env) $ pip3 install numpy==1.26 scipy==1.12.0
+(spins-env) $ pip3 install seaborn numpy==1.26 scipy==1.12.0
 
 We need to explicitly downgrade some packages since some of the
 trivial changes their devs made broke the spins library. Anyone
